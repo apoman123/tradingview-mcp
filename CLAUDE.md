@@ -1,6 +1,22 @@
 # TradingView MCP — Claude Instructions
 
-84 tools for reading and controlling a live TradingView Desktop chart via CDP (port 9222).
+Tools for reading and controlling live TradingView Desktop charts via CDP (port 9222).
+
+## Concurrent Worker Sessions
+
+A TradingView session owns one chart tab. For concurrent symbol analysis,
+create one session per worker with `tv_session_create`, pass that `session_id`
+to every chart/data/Pine tool used by the worker, and call
+`tv_session_release` when finished. Worker calls execute directly on the
+session's background CDP target.
+
+Do not use `tab_switch` to choose worker context. It only changes the tab shown
+to the human and does not alter any session binding. A stale session fails
+clearly if its tab is closed; it is never redirected to another chart.
+
+For deterministic fan-out, acquire N sessions in program code, run N worker
+tasks concurrently, aggregate, then release. Use an LLM supervisor for dynamic
+task discovery, not for rediscovering this fixed orchestration pattern.
 
 ## Decision Tree — Which Tool When
 
@@ -123,7 +139,8 @@ These tools can return large payloads. Follow these rules to avoid context bloat
 ## Architecture
 
 ```
-Claude Code ←→ MCP Server (stdio) ←→ CDP (localhost:9222) ←→ TradingView Desktop (Electron)
+Worker -> session_id -> target-scoped CDP client -> TradingView chart tab
+                                      `-> shared Electron shell (tab UI only)
 ```
 
 Pine graphics path: `study._graphics._primitivesCollection.dwglines.get('lines').get(false)._primitivesDataById`

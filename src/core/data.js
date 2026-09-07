@@ -1,7 +1,13 @@
 /**
  * Core data access logic.
  */
-import { evaluate, evaluateAsync, KNOWN_PATHS, safeString } from '../connection.js';
+import {
+  evaluate,
+  evaluateAsync,
+  getCurrentTargetId,
+  KNOWN_PATHS,
+  safeString,
+} from '../connection.js';
 import { waitForChartReady } from '../wait.js';
 
 const MAX_OHLCV_BARS = 500;
@@ -18,7 +24,7 @@ const BARS_PATH = KNOWN_PATHS.mainSeriesBars;
 // can't race over the shared chart state. JS is single-threaded but our
 // awaits interleave; without this every parallel quote_get(symbol) would
 // read whichever symbol the chart happened to be on at evaluate() time.
-let _quoteLock = Promise.resolve();
+const quoteLocks = new Map();
 
 // Shared page-context JS: locate the strategy data source. Strategies are
 // identified by metaInfo().isTVScriptStrategy / is_strategy — NOT by
@@ -368,10 +374,16 @@ export async function getEquity() {
 }
 
 export async function getQuote({ symbol } = {}) {
-  // Serialize: chained on _quoteLock so parallel callers run one after another.
-  // Catch on the lock chain prevents a single failure from poisoning the chain.
-  const run = _quoteLock.then(() => _getQuoteInternal({ symbol }));
-  _quoteLock = run.then(() => {}, () => {});
+  // Serialize temporary symbol changes per target. Different session targets
+  // remain independent and can fetch quotes concurrently.
+  const lockKey = getCurrentTargetId() || 'legacy_default_target';
+  const previous = quoteLocks.get(lockKey) || Promise.resolve();
+  const run = previous.then(() => _getQuoteInternal({symbol}));
+  const tail = run.then(() => {}, () => {});
+  quoteLocks.set(lockKey, tail);
+  tail.finally(() => {
+    if (quoteLocks.get(lockKey) === tail) quoteLocks.delete(lockKey);
+  });
   return run;
 }
 

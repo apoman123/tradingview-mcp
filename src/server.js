@@ -14,6 +14,9 @@ import { registerWatchlistTools } from './tools/watchlist.js';
 import { registerUiTools } from './tools/ui.js';
 import { registerPaneTools } from './tools/pane.js';
 import { registerTabTools } from './tools/tab.js';
+import {registerSessionTools} from './tools/session.js';
+import {sessionAwareServer} from './tools/session-aware-server.js';
+import {sessionRuntime} from './core/session-runtime.js';
 
 const server = new McpServer(
   {
@@ -22,7 +25,7 @@ const server = new McpServer(
     description: 'AI-assisted TradingView chart analysis and Pine Script development via Chrome DevTools Protocol',
   },
   {
-    instructions: `TradingView MCP — 84 tools for reading and controlling a live TradingView Desktop chart.
+    instructions: `TradingView MCP tools for reading and controlling live TradingView Desktop charts.
 
 TOOL SELECTION GUIDE — use this to pick the right tool:
 
@@ -59,6 +62,13 @@ Alerts: alert_create, alert_list, alert_delete
 Launch: tv_launch → auto-detect and start TradingView with CDP on any platform
 Panes: pane_list, pane_set_layout (s, 2h, 2v, 4, 6, 8), pane_focus, pane_set_symbol
 Tabs: tab_list, tab_new, tab_close, tab_switch
+Sessions: tv_session_create, tv_session_list, tv_session_status, tv_session_bind, tv_session_release
+
+CONCURRENT WORKERS:
+- A TradingView session owns one chart tab target. Use one session per concurrently analyzed symbol.
+- Pass session_id to every target-sensitive tool used by that worker.
+- Do not call tab_switch to select worker context; it only changes the visible Desktop UI.
+- Release sessions when work finishes so their tabs can be reused.
 
 CONTEXT MANAGEMENT:
 - ALWAYS use summary=true on data_get_ohlcv
@@ -69,21 +79,24 @@ CONTEXT MANAGEMENT:
   }
 );
 
-// Register all tool groups
-registerHealthTools(server);
-registerChartTools(server);
-registerPineTools(server);
-registerDataTools(server);
-registerCaptureTools(server);
-registerDrawingTools(server);
-registerAlertTools(server);
-registerBatchTools(server);
-registerReplayTools(server);
-registerIndicatorTools(server);
-registerWatchlistTools(server);
-registerUiTools(server);
-registerPaneTools(server);
-registerTabTools(server);
+// Session tools own lifecycle. Existing target-sensitive tools are augmented
+// with one optional session_id and routed to that session's explicit target.
+registerSessionTools(server, sessionRuntime);
+const routedServer = sessionAwareServer(server, sessionRuntime);
+registerHealthTools(routedServer);
+registerChartTools(routedServer);
+registerPineTools(routedServer);
+registerDataTools(routedServer);
+registerCaptureTools(routedServer);
+registerDrawingTools(routedServer);
+registerAlertTools(routedServer);
+registerBatchTools(routedServer);
+registerReplayTools(routedServer);
+registerIndicatorTools(routedServer);
+registerWatchlistTools(routedServer);
+registerUiTools(routedServer);
+registerPaneTools(routedServer);
+registerTabTools(routedServer);
 
 // Startup notice (stderr so it doesn't interfere with MCP stdio protocol)
 process.stderr.write('⚠  tradingview-mcp  |  Unofficial tool. Not affiliated with TradingView Inc. or Anthropic.\n');

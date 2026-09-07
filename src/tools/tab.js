@@ -23,12 +23,12 @@ export function registerTabTools(server) {
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tab_close', 'Close the current chart tab', {}, async () => {
+  server.tool('tab_close', 'Close the currently visible chart tab. This is a shared Desktop UI action and can make a worker session stale; use tv_session_release to return a worker tab to the pool without closing it.', {}, async () => {
     try { return jsonResult(await core.closeTab()); }
     catch (err) { return jsonResult({ success: false, error: err.message }, true); }
   });
 
-  server.tool('tab_switch', 'Switch to a chart tab by index', {
+  server.tool('tab_switch', 'Visually show a TradingView tab by index. This changes the shared Desktop UI but does not bind or redirect worker sessions; use tv_session_bind for explicit worker assignment.', {
     index: z.coerce.number().describe('Tab index (0-based, from tab_list)'),
   }, async ({ index }) => {
     try { return jsonResult(await core.switchTab({ index })); }

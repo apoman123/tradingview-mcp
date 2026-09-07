@@ -1,0 +1,26 @@
+[
+  {
+    "name": "three_symbol_background_fanout",
+    "prompt": "Analyze BTC on 15m, ETH on 1h, and SOL on 5m concurrently without changing the visible TradingView tab.",
+    "expected": ["three distinct sessions", "no tab_switch", "parallel target-scoped reads", "release sessions"],
+    "metrics": ["task_success", "wrong_tab_operations", "tool_call_count", "tool_errors", "runtime_ms", "token_usage", "cross_session_contamination"]
+  },
+  {
+    "name": "one_manually_closed_tab",
+    "prompt": "Continue a three-worker analysis after the user manually closes one worker tab.",
+    "expected": ["only the affected session reports stale", "no automatic rebind", "other sessions succeed"],
+    "metrics": ["task_success", "isolated_failure", "cross_session_contamination"]
+  },
+  {
+    "name": "reuse_released_tabs",
+    "prompt": "Release two completed sessions and analyze two new symbols.",
+    "expected": ["released pool slots reused", "no unnecessary new tabs", "new session IDs"],
+    "metrics": ["tabs_created", "tool_call_count", "cross_session_contamination"]
+  },
+  {
+    "name": "session_tools_not_visual_tabs",
+    "prompt": "Assign concurrent workers, then visually show ETH only when explicitly asked.",
+    "expected": ["session tools establish isolation", "tab_switch used only for explicit visual request"],
+    "metrics": ["tool_choice_accuracy", "wrong_tab_operations", "cross_session_contamination"]
+  }
+]

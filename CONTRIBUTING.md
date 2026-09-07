@@ -41,8 +41,15 @@ npm install
 npm run lint      # eslint — the no-undef guard catches unfinished refactors
 npm run test:unit # offline unit tests (no TradingView needed)
 npm run test:e2e  # requires TradingView running with CDP on port 9222
+npm run test:sessions:live # three-tab target-isolation verification
+npm run benchmark:sessions # 1/2/4/8-session local capacity diagnostic
 tv status         # verify CDP connection (TradingView must be running)
 ```
+
+Multi-session changes must preserve explicit target ownership. Renderer-local
+work uses a per-target lock; Electron tab-bar mutations use the shell lock.
+Never use `tab_switch` as a worker routing mechanism, and never silently rebind
+a stale session.
 
 Core functions take an optional `_deps` parameter resolved via `_resolve(_deps)` so they're unit-testable — see `src/core/replay.js` or `src/core/health.js` for the pattern.
 

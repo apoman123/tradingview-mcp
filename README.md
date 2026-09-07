@@ -4,6 +4,13 @@
 
 Personal AI assistant for your TradingView Desktop charts. Connects Claude Code to your locally running TradingView app via Chrome DevTools Protocol for AI-assisted chart analysis, Pine Script development, and workflow automation.
 
+For concurrent LangChain workers, create one `tv_session_*` binding per worker
+and pass its `session_id` to existing chart/data/Pine tools. Sessions attach
+directly to separate CDP page targets in the same Desktop window; `tab_switch`
+only changes the human-visible tab. See
+[`docs/multi-session.md`](docs/multi-session.md) and
+[`examples/langchain_multi_session.py`](examples/langchain_multi_session.py).
+
 > [!WARNING]
 > **This tool is not affiliated with, endorsed by, or associated with TradingView Inc.** It interacts with your locally running TradingView Desktop application via Chrome DevTools Protocol. Review the [Disclaimer](#disclaimer) before use.
 
@@ -67,7 +74,10 @@ Gives your AI assistant eyes and hands on your own chart:
 - **Screenshots** — capture chart state for AI visual analysis
 - **Multi-pane layouts** — set up 2x2, 3x1, etc. grids with different symbols per pane
 - **Monitor your chart** — stream JSONL from your locally running chart for local monitoring scripts
-- **CLI access** — every MCP tool is also a `tv` CLI command, pipe-friendly with JSON output
+- **Concurrent worker sessions** — bind independent agents to separate chart
+  targets in one TradingView Desktop window
+- **CLI access** — use the legacy single-chart feature set from pipe-friendly
+  JSON commands
 - **Launch TradingView** — auto-detect and launch with debug mode from any platform
 
 ## Install with Claude Code
@@ -136,9 +146,31 @@ Replace `/path/to/tradingview-mcp` with your actual path.
 
 Ask Claude: *"Use tv_health_check to verify TradingView is connected"*
 
+### 5. Run concurrent workers
+
+Create one session per active worker and pass its `session_id` to every
+target-sensitive call:
+
+```text
+tv_session_create(worker_label="btc", symbol="BINANCE:BTCUSDT", timeframe="15")
+tv_session_create(worker_label="eth", symbol="BINANCE:ETHUSDT", timeframe="60")
+
+worker BTC -> chart/data/Pine calls with session_id="tv_session_1"
+worker ETH -> chart/data/Pine calls with session_id="tv_session_2"
+```
+
+Run the worker tasks concurrently, aggregate their results, then call
+`tv_session_release` for each session in a `finally` block. Workers must not call
+`tab_switch`; that tool changes only the tab visible to the human. See the
+[multi-session guide](docs/multi-session.md) and
+[LangChain example](examples/langchain_multi_session.py).
+
 ## CLI
 
-Every MCP tool is also accessible as a `tv` CLI command. All output is JSON for piping with `jq`.
+The single-chart feature set is also accessible through the `tv` CLI. Session
+lifecycle and concurrent worker routing are MCP features; CLI renderer commands
+retain the legacy active-chart behavior. All CLI output is JSON for piping with
+`jq`.
 
 ```bash
 # Install globally (optional)
@@ -216,8 +248,9 @@ Claude reads [`CLAUDE.md`](CLAUDE.md) automatically when working in this project
 | "Set up a 4-chart grid" | `pane_set_layout` → `pane_set_symbol` for each pane |
 | "Draw a level at 24500" | `draw_shape` (horizontal_line) |
 | "Take a screenshot" | `capture_screenshot` |
+| "Analyze BTC, ETH, and SOL concurrently" | create one `tv_session_*` per worker, pass `session_id`, run in parallel, then release |
 
-## Tool Reference (78 MCP tools)
+## Tool Reference (89 MCP tools)
 
 ### Chart Reading
 
@@ -269,7 +302,26 @@ Read `line.new()`, `label.new()`, `table.new()`, `box.new()` output from any vis
 |------|-------------|
 | `tab_list` | List open chart tabs |
 | `tab_new` / `tab_close` | Open/close tabs |
-| `tab_switch` | Switch to a tab by index |
+| `tab_switch` | Change the human-visible tab; does not bind a worker session |
+
+### Concurrent Worker Sessions
+
+| Tool | What it does |
+|------|-------------|
+| `tv_session_create` | Acquire a reusable chart tab for one worker |
+| `tv_session_list` | List sessions; detailed mode includes debug target IDs |
+| `tv_session_status` | Validate target health and symbol/timeframe ownership |
+| `tv_session_bind` | Deliberately bind a session to an unclaimed chart tab |
+| `tv_session_release` | Return a chart tab to the pool without closing it |
+
+Existing target-sensitive tools accept optional `session_id`. Omit it to retain
+the legacy active-chart workflow. A stale session fails explicitly and never
+rebinds itself to another tab. Concurrent session creation atomically assigns
+distinct available targets or returns a capacity error.
+
+One active worker task should own one session. Release removes the logical
+ownership and closes only that target's cached CDP client; the chart tab stays
+open in the pool for reuse.
 
 ### Pine Script Development
 
@@ -341,22 +393,49 @@ The key flag: `--remote-debugging-port=9222`
 ## Testing
 
 ```bash
-# Requires TradingView running with --remote-debugging-port=9222
-npm test
+# Offline unit suite (does not require TradingView Desktop)
+npm run test:unit
+
+# Live three-tab target-isolation verification
+npm run test:sessions:live
+
+# Validate renderer capabilities while tabs are in the background
+npm run test:sessions:background
+
+# Capacity diagnostic for 1, 2, 4, and 8 sessions
+npm run benchmark:sessions
 ```
 
-29 tests covering: Pine Script static analysis, server-side compilation, and CLI routing.
+The live, background, and benchmark commands require TradingView Desktop to be
+running with `--remote-debugging-port=9222`. The offline suite covers target
+connection isolation, connection deduplication, stale targets, session
+lifecycle, tab-pool ownership, per-target and shell locking, session-aware MCP
+routing, legacy behavior, and the public tool surface.
 
 ## Architecture
 
-```
-Claude Code  ←→  MCP Server (stdio)  ←→  CDP (port 9222)  ←→  TradingView Desktop (Electron)
+```text
+LangChain/Claude workers
+        ↕ session_id
+MCP Server (stdio) -> SessionManager -> TabPool
+                              ↕ target_id
+                    TargetConnectionManager
+                    ↙        ↓        ↘
+              CDP client A  client B  client C
+                    ↘        ↓        ↙
+           TradingView Desktop on localhost:9222
 ```
 
-- **Transport**: MCP over stdio (84 tools) + CLI (`tv` command, 30 commands with 66 subcommands)
-- **Connection**: Chrome DevTools Protocol on localhost:9222
+- **Transport**: MCP over stdio (89 tools) plus the legacy single-chart `tv` CLI
+- **Connection**: independent cached CDP clients keyed by validated page target
+- **Concurrency**: per-target FIFO locks for renderer work; one shell lock for
+  tab-bar mutations; a separate account lock for account-wide mutations
+- **Isolation**: visible tab focus does not affect a worker's bound session;
+  stale targets fail without silent reassignment
+- **Compatibility**: calls without `session_id` use the legacy default chart
 - **Streaming**: Poll-and-diff loop with deduplication, JSONL output to stdout
-- **No dependencies** beyond `@modelcontextprotocol/sdk` and `chrome-remote-interface`
+- **Runtime dependencies**: `@modelcontextprotocol/sdk` and
+  `chrome-remote-interface`
 
 ## Attributions
 

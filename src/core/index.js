@@ -14,3 +14,16 @@ export * as batch from './batch.js';
 export * as watchlist from './watchlist.js';
 export * as indicators from './indicators.js';
 export * as ui from './ui.js';
+export {SessionManager} from './session.js';
+export {SessionRuntime} from './session-runtime.js';
+export {TabPool} from './tab-pool.js';
+export {
+  closeAllTargetClients,
+  closeTargetClient,
+  evaluateAsyncOnTarget,
+  evaluateOnTarget,
+  getClientForTarget,
+  listChartTargets,
+  runWithTarget,
+  targetConnectionManager,
+} from '../connection.js';
